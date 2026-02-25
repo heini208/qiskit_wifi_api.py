@@ -1,0 +1,4 @@
+qiskit
+qiskit-ibm-runtime
+pySerial
+qiskit-aer
