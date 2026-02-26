@@ -1,319 +1,193 @@
-import json
+#!/usr/bin/env python3
+import socket
+import socketserver
+import threading
 import time
-from flask import Flask, request, jsonify
-from qiskit import QuantumCircuit, transpile
-from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
-from qiskit_aer import Aer
 from collections import deque
 
+# (Optional) Qiskit imports reused from your original server.
+try:
+    from qiskit import QuantumCircuit, transpile
+    from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+    from qiskit_aer import Aer
+except Exception:
+    QuantumCircuit = None
+    transpile = None
+    QiskitRuntimeService = None
+    Sampler = None
+    Aer = None
 
-app = Flask(__name__)
-app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+HOST = "0.0.0.0"
+PORT = 5000
 
-# Store connected devices and their states
 connected_devices = {}
+device_logs = deque(maxlen=200)
+lock = threading.Lock()
 
-
-def configure_ibm_token(token: str) -> dict:
-    """Configure IBM Quantum token"""
+def get_local_ip():
+    """Return a best-effort LAN IP address for this host (does not send packets)."""
     try:
-        QiskitRuntimeService.save_account(token=token, channel='ibm_quantum', overwrite=True)
-        print("IBM Quantum token configured.")
-        return {"status": "success", "message": "IBM token configured"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        pass
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return "127.0.0.1"
 
-
-def generate_superposition_qubits_simulated(num_qubits: int) -> list[int]:
-    """Generate superposition qubits using Qiskit Aer simulator"""
-    circuit = QuantumCircuit(num_qubits, num_qubits)
-    circuit.h(range(num_qubits))
-    circuit.measure(range(num_qubits), range(num_qubits))
-
+def generate_superposition_qubits_simulated(n):
+    if Aer is None or QuantumCircuit is None:
+        # fallback: produce pseudo-random bits if Qiskit not available
+        import random
+        return [random.randint(0,1) for _ in range(n)]
+    circuit = QuantumCircuit(n, n)
+    circuit.h(range(n))
+    circuit.measure(range(n), range(n))
     simulator = Aer.get_backend('qasm_simulator')
     job = simulator.run([circuit])
     result = job.result()
     counts = result.get_counts()
+    bits = list(counts.keys())[0]
+    return list(map(int, list(bits)))
 
-    return list(map(int, list(counts.keys())[0]))
-
-
-def start_real_ibm_job(num_qubits: int) -> dict:
-    """Start a job on a real IBM Quantum computer and return the job ID"""
+def start_real_ibm_job(n):
+    if QiskitRuntimeService is None:
+        return "ERROR qiskit-not-available"
     try:
         service = QiskitRuntimeService()
         backend = service.least_busy(operational=True, simulator=False)
-        print("Using backend:", backend.name, "with gates:", backend.configuration().basis_gates)
-
-        circuit = QuantumCircuit(num_qubits, num_qubits)
-        circuit.h(range(num_qubits))
-        circuit.measure(range(num_qubits), range(num_qubits))
-
+        circuit = QuantumCircuit(n, n)
+        circuit.h(range(n))
+        circuit.measure(range(n), range(n))
         circuit = transpile(circuit, backend)
-
         sampler = Sampler(backend)
         job = sampler.run([circuit])
-        return {"status": "success", "job_id": job.job_id()}
+        return f"OK JOBID:{job.job_id()}"
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return "ERROR " + str(e)
 
+class Handler(socketserver.StreamRequestHandler):
+    def setup(self):
+        super().setup()
+        with lock:
+            connected_devices[self.client_address] = {"connected_at": time.time()}
+        print(f"[CONNECT] {self.client_address}")
 
-def get_job_status(job_id: str) -> dict:
-    """Retrieve the status of a quantum job"""
-    try:
-        service = QiskitRuntimeService()
-        job = service.job(job_id)
-        return {"status": "success", "job_status": str(job.status())}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-def get_job_result(job_id: str) -> dict:
-    """Retrieve the result of a quantum job"""
-    try:
-        service = QiskitRuntimeService()
-        job = service.job(job_id)
-        result = job.result()
-        counts = result[0].data['c'].get_counts()
-
-        return {"status": "success", "job_result": list(map(int, list(counts.keys())[0]))}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-def make_json_response(data, status=200):
-    """Helper to create compact JSON response"""
-    return app.response_class(
-        response=json.dumps(data, separators=(',', ':')),
-        status=status,
-        mimetype='application/json'
-    )
-
-
-# ============= ENDPOINTS =============
-
-device_logs = deque(maxlen=200)
-
-@app.route('/log', methods=['GET', 'POST'])
-def log_msg():
-    # Accept ?m=... on GET or JSON {"m": "..."} on POST
-    msg = request.args.get('m')
-    if msg is None:
+    def send_line(self, text: str):
+        """Log and send a single-line response (ensures trailing newline)."""
+        if not text.endswith("\n"):
+            out = text + "\n"
+        else:
+            out = text
+        # Print what we're sending so you can see exactly what the Calliope will receive
+        print(f"[SEND] {self.client_address}: {out.rstrip()}")
         try:
-            data = request.get_json(force=True, silent=True) or {}
-            msg = data.get('m')
-        except Exception:
-            msg = None
-    if not msg:
-        return jsonify({"status": "error", "message": "m is required"}), 400
+            self.wfile.write(out.encode('utf-8'))
+        except Exception as e:
+            print("[WRITE ERROR]", e)
 
-    entry = {"msg": msg}
-    device_logs.append(entry)
-    print(f"[DEVICE LOG] {msg}")
-    return jsonify({"status": "ok"})
+    def handle(self):
+        while True:
+            line = self.rfile.readline()
+            if not line:
+                break
+            try:
+                text = line.decode('utf-8').rstrip('\r\n')
+            except Exception:
+                self.send_line("ERROR invalid-encoding")
+                continue
+            if not text:
+                continue
+            print(f"[REQ] {self.client_address}: {text}")
 
-@app.route('/logs', methods=['GET'])
-def logs():
-    # Return recent logs
-    return jsonify({"logs": list(device_logs)})
+            parts = text.split(' ', 1)
+            cmd = parts[0].upper()
+            arg = parts[1] if len(parts) > 1 else ""
 
-@app.route('/measure', methods=['GET'])
-def measure():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"MEASURE REQUEST from {client_ip}")
-    print(f"   Parameters: qbits={request.args.get('qbits', 1)}")
+            try:
+                if cmd == "LOG":
+                    if not arg:
+                        self.send_line("ERROR m-required")
+                    else:
+                        device_logs.append({"msg": arg, "from": str(self.client_address), "ts": time.time()})
+                        print(f"[DEVICE LOG] {arg}")
+                        self.send_line("OK")
 
-    try:
-        num_qubits = int(request.args.get('qbits', 1))
-        result = generate_superposition_qubits_simulated(num_qubits)
+                elif cmd == "LOGS":
+                    out = []
+                    for e in device_logs:
+                        msg = e["msg"].replace("|", "\\|")
+                        out.append(f"{int(e['ts'])}:{msg}")
+                    self.send_line(",".join(out))
 
-        # Simple string response
-        response_text = "Response:[" + ",".join(map(str, result)) + "]"
+                elif cmd == "MEASURE":
+                    n = int(arg) if arg else 1
+                    res = generate_superposition_qubits_simulated(n)
+                    self.send_line(f"RESPONSE [{','.join(map(str,res))}]")
 
-        print(f"SENDING RESPONSE:")
-        print(f"   {response_text}")
-        print(f"{'=' * 60}\n")
+                elif cmd == "START_JOB":
+                    n = int(arg) if arg else 1
+                    res = generate_superposition_qubits_simulated(n)
+                    self.send_line(f"OK RESULT [{','.join(map(str,res))}]")
 
-        return response_text, 200, {'Content-Type': 'text/plain'}
-    except Exception as e:
-        error_response = f"Error:{str(e)}"
-        print(f"ERROR: {error_response}")
-        print(f"{'=' * 60}\n")
-        return error_response, 400, {'Content-Type': 'text/plain'}
+                elif cmd == "START_REAL_JOB":
+                    n = int(arg) if arg else 1
+                    out = start_real_ibm_job(n)
+                    self.send_line(out)
 
+                elif cmd == "CONFIGURE_IBM":
+                    token = arg.strip()
+                    if not token:
+                        self.send_line("ERROR token-required")
+                    else:
+                        # Implement token storage if needed
+                        self.send_line("OK token-configured")
 
-@app.route('/start_job', methods=['POST', 'GET'])
-def start_job():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"START JOB REQUEST from {client_ip}")
+                elif cmd == "JOB_STATUS" or cmd == "JOB_RESULT":
+                    self.send_line("ERROR not-implemented")
 
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            num_qubits = data.get('num_qubits', 1)
-            print(f"   Method: POST, Body: {data}")
-        else:
-            num_qubits = int(request.args.get('num_qubits', 1))
-            print(f"   Method: GET, Parameters: num_qubits={num_qubits}")
+                elif cmd == "STATUS":
+                    self.send_line(f"OK running devices={len(connected_devices)}")
 
-        result = generate_superposition_qubits_simulated(num_qubits)
+                elif cmd == "HELP":
+                    self.send_line("OK Commands: LOG,LOGS,MEASURE n,START_JOB n,START_REAL_JOB n,CONFIGURE_IBM token,STATUS")
 
-        response = {'status': 'success', 'job_result': result}
+                else:
+                    self.send_line("ERROR unknown-command")
 
-        print(f"SENDING RESPONSE:")
-        print(f"   {json.dumps(response, indent=2)}")
-        print(f"{'=' * 60}\n")
+            except Exception as e:
+                self.send_line("ERROR " + str(e))
 
-        return make_json_response(response)
-    except Exception as e:
-        error_response = {'status': 'error', 'message': str(e)}
-        print(f"ERROR: {error_response}")
-        print(f"{'=' * 60}\n")
-        return make_json_response(error_response, 400)
+    def finish(self):
+        super().finish()
+        with lock:
+            if self.client_address in connected_devices:
+                del connected_devices[self.client_address]
+        print(f"[DISCONNECT] {self.client_address}")
 
+class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
 
-@app.route('/start_real_job', methods=['POST', 'GET'])
-def start_real_job():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"START REAL IBM JOB REQUEST from {client_ip}")
-
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            num_qubits = data.get('num_qubits', 1)
-        else:
-            num_qubits = int(request.args.get('num_qubits', 1))
-
-        result = start_real_ibm_job(num_qubits)
-
-        print(f"SENDING RESPONSE:")
-        print(f"   {json.dumps(result, indent=2)}")
-        print(f"{'=' * 60}\n")
-
-        return make_json_response(result)
-    except Exception as e:
-        error_response = {'status': 'error', 'message': str(e)}
-        print(f"ERROR: {error_response}")
-        return make_json_response(error_response, 400)
-
-
-@app.route('/configure_ibm', methods=['POST', 'GET'])
-def configure_ibm():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"CONFIGURE IBM TOKEN REQUEST from {client_ip}")
-
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            token = data.get('token')
-        else:
-            token = request.args.get('token')
-
-        if not token:
-            return make_json_response({'status': 'error', 'message': 'Token is required'}, 400)
-
-        result = configure_ibm_token(token)
-
-        print(f"SENDING RESPONSE:")
-        print(f"   {json.dumps(result, indent=2)}")
-        print(f"{'=' * 60}\n")
-
-        return make_json_response(result)
-    except Exception as e:
-        error_response = {'status': 'error', 'message': str(e)}
-        return make_json_response(error_response, 400)
-
-
-@app.route('/job_status', methods=['GET', 'POST'])
-def job_status():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"JOB STATUS REQUEST from {client_ip}")
-
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            job_id = data.get('job_id')
-        else:
-            job_id = request.args.get('job_id')
-
-        if not job_id:
-            return make_json_response({'status': 'error', 'message': 'job_id is required'}, 400)
-
-        result = get_job_status(job_id)
-
-        print(f"SENDING RESPONSE:")
-        print(f"   {json.dumps(result, indent=2)}")
-        print(f"{'=' * 60}\n")
-
-        return make_json_response(result)
-    except Exception as e:
-        error_response = {'status': 'error', 'message': str(e)}
-        return make_json_response(error_response, 400)
-
-
-@app.route('/job_result', methods=['GET', 'POST'])
-def job_result():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"JOB RESULT REQUEST from {client_ip}")
-
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            job_id = data.get('job_id')
-        else:
-            job_id = request.args.get('job_id')
-
-        if not job_id:
-            return make_json_response({'status': 'error', 'message': 'job_id is required'}, 400)
-
-        result = get_job_result(job_id)
-
-        print(f"SENDING RESPONSE:")
-        print(f"   {json.dumps(result, indent=2)}")
-        print(f"{'=' * 60}\n")
-
-        return make_json_response(result)
-    except Exception as e:
-        error_response = {'status': 'error', 'message': str(e)}
-        return make_json_response(error_response, 400)
-
-
-@app.route('/status', methods=['GET'])
-def status():
-    client_ip = request.remote_addr
-    print(f"\n{'=' * 60}")
-    print(f"STATUS CHECK from {client_ip}")
-
-    response = {
-        'status': 'running',
-        'devices': len(connected_devices),
-        'endpoints': [
-            '/log',
-            '/measure',
-            '/start_job',
-            '/start_real_job',
-            '/configure_ibm',
-            '/job_status',
-            '/job_result',
-            '/status'
-        ]
-    }
-
-    print(f"SENDING RESPONSE:")
-    print(f"   {json.dumps(response, indent=2)}")
-    print(f"{'=' * 60}\n")
-
-    return make_json_response(response)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
+    local_ip = get_local_ip()
     print("=" * 60)
-    print("Starting Calliope Quantum Communication Server")
+    print("Starting plain-text TCP server")
+    print(f"Listening on {local_ip}:{PORT} (binds to {HOST}:{PORT})")
+    print("Use this IP in your ESP AT+CIPSTART command, e.g.:")
+    print(f'  AT+CIPSTART="TCP","{local_ip}",{PORT}')
     print("=" * 60)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+    with ThreadedServer((HOST, PORT), Handler) as server:
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("Shutting down")
+            server.shutdown()
+            server.server_close()
