@@ -49,6 +49,8 @@ def generate_superposition_qubits_simulated(n):
 def start_real_ibm_job(n):
     service = QiskitRuntimeService()
     backend = service.least_busy(operational=True, simulator=False)
+    print("Using backend:", backend.name, "with gates:", backend.configuration().basis_gates)
+
     circuit = QuantumCircuit(n, n)
     circuit.h(range(n))
     circuit.measure(range(n), range(n))
@@ -56,6 +58,27 @@ def start_real_ibm_job(n):
     sampler = Sampler(backend)
     job = sampler.run([circuit])
     return f"OK JOBID:{job.job_id()}"
+
+def get_job_status(job_id: str) -> str:
+    """Retrieve the status of a quantum job using IBM Qiskit Runtime."""
+    service = QiskitRuntimeService()
+    job = service.job(job_id)
+    return job.status()
+
+def get_job_result(job_id: str) -> list[int]:
+    """Retrieve the result of a quantum job using IBM Qiskit Runtime."""
+    service = QiskitRuntimeService()
+    job = service.job(job_id)
+    result = job.result()
+    counts = result[0].data['c'].get_counts()
+
+    return list(map(int, list(counts.keys())[0]))
+
+
+def configure_ibm_token(token: str) -> bytes:
+    QiskitRuntimeService.save_account(token = token, set_as_default = True, overwrite=True)
+    print("IBM Quantum token configured.")
+    return "OK"
 
 class Handler(socketserver.StreamRequestHandler):
     def setup(self):
@@ -132,10 +155,18 @@ class Handler(socketserver.StreamRequestHandler):
                         self.send_line("ERROR token-required")
                     else:
                         # Implement token storage if needed
-                        self.send_line("OK token-configured")
+                        out = configure_ibm_token(token)
+                        self.send_line(out)
 
-                elif cmd == "JOB_STATUS" or cmd == "JOB_RESULT":
-                    self.send_line("ERROR not-implemented")
+                elif (cmd == "JOB_STATUS"):
+                    job_id = arg.strip()
+                    out = get_job_status(job_id)
+                    self.send_line(out)
+
+                elif (cmd == "JOB_RESULT"):
+                    job_id = arg.strip()
+                    out = get_job_result(job_id)
+                    self.send_line(f"OK RESULT [{','.join(map(str,out))}]")
 
                 elif cmd == "STATUS":
                     self.send_line(f"OK running devices={len(connected_devices)}")
