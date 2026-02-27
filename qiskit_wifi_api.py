@@ -5,17 +5,10 @@ import threading
 import time
 from collections import deque
 
-# (Optional) Qiskit imports reused from your original server.
-try:
-    from qiskit import QuantumCircuit, transpile
-    from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
-    from qiskit_aer import Aer
-except Exception:
-    QuantumCircuit = None
-    transpile = None
-    QiskitRuntimeService = None
-    Sampler = None
-    Aer = None
+from qiskit import QuantumCircuit, transpile
+from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+from qiskit_aer import Aer
+
 
 HOST = "0.0.0.0"
 PORT = 5000
@@ -43,10 +36,6 @@ def get_local_ip():
     return "127.0.0.1"
 
 def generate_superposition_qubits_simulated(n):
-    if Aer is None or QuantumCircuit is None:
-        # fallback: produce pseudo-random bits if Qiskit not available
-        import random
-        return [random.randint(0,1) for _ in range(n)]
     circuit = QuantumCircuit(n, n)
     circuit.h(range(n))
     circuit.measure(range(n), range(n))
@@ -58,20 +47,15 @@ def generate_superposition_qubits_simulated(n):
     return list(map(int, list(bits)))
 
 def start_real_ibm_job(n):
-    if QiskitRuntimeService is None:
-        return "ERROR qiskit-not-available"
-    try:
-        service = QiskitRuntimeService()
-        backend = service.least_busy(operational=True, simulator=False)
-        circuit = QuantumCircuit(n, n)
-        circuit.h(range(n))
-        circuit.measure(range(n), range(n))
-        circuit = transpile(circuit, backend)
-        sampler = Sampler(backend)
-        job = sampler.run([circuit])
-        return f"OK JOBID:{job.job_id()}"
-    except Exception as e:
-        return "ERROR " + str(e)
+    service = QiskitRuntimeService()
+    backend = service.least_busy(operational=True, simulator=False)
+    circuit = QuantumCircuit(n, n)
+    circuit.h(range(n))
+    circuit.measure(range(n), range(n))
+    circuit = transpile(circuit, backend)
+    sampler = Sampler(backend)
+    job = sampler.run([circuit])
+    return f"OK JOBID:{job.job_id()}"
 
 class Handler(socketserver.StreamRequestHandler):
     def setup(self):
@@ -127,7 +111,7 @@ class Handler(socketserver.StreamRequestHandler):
                         out.append(f"{int(e['ts'])}:{msg}")
                     self.send_line(",".join(out))
 
-                elif cmd == "MEASURE":
+                elif cmd == "MEASURE_SIM":
                     n = int(arg) if arg else 1
                     res = generate_superposition_qubits_simulated(n)
                     self.send_line(f"RESPONSE [{','.join(map(str,res))}]")
