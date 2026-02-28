@@ -1,0 +1,66 @@
+try having this folder structure:
+~/roberta/openroberta-lab
+~/roberta/qiskit_wifi_api.py
+~/roberta/ora-cc-rsc
+~/roberta/cc/gcc-arm-none-eabi-10.3-2021.10/bin
+
+install these:
+https://github.com/OpenRoberta/openroberta-lab#:~:text=compilation%20of%20course.-,Prerequisites,-You%20need%20Java
+
+pull the lab --> 
+	git clone https://github.com/heini208/openroberta-lab.git
+	cd open-roberta-lab		
+	git checkout feature/calliope_qiskit
+
+download calliope-cc:
+
+	sudo apt-get install srecord libssl-dev
+
+Download:
+	https://developer.arm.com/downloads/-/gnu-rm
+
+	put xtensa next to roberta and add path to bin to \.profile
+	uname -m to check if you need aarch or x86_64
+	tar -xvjf gcc...
+	echo export PATH="$PATH:PATHTOBIN" >> ~/.profile
+	source ~/.profile
+	arm-none-eabi-g++ --version 
+	#>> 10.3.1 
+
+clone ora-cc --> 
+	git clone https://github.com/OpenRoberta/ora-cc-rsc.git
+
+	echo export robot_crosscompiler_resourcebase="/home/pi/roberta/ora-cc-rsc" >> ~/.bashrc
+	source ~/.bashrc
+
+cd to lab and do:
+	mvn clean install -DskipTests
+	./admin.sh -git-mode create-empty-db
+
+
+pull qiskit-tcp-server -->
+
+	 git clone https://github.com/heini208/qiskit_wifi_api.py.git
+
+install qiskit requirements
+	sudo apt install -y python3-full python3-venv
+	cd ~/roberta/qiskit_wifi_api.py/
+create virtual_env
+	python3 -m venv .venv
+	source .venv/bin/activate
+
+(optional) add start script to autostart 
+
+OR start manually:
+cd ~/roberta/qiskit_wifi_api.py/
+source .venv/bin/activate
+python qiskit_wifi_api.py
+
+
+and lab:
+cd ~/roberta/openroberta-lab
+./ora.sh  start-from-git
+
+
+lab is on (ip shown on python server:1999
+and qiskit on the same with :5000
