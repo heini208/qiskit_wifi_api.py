@@ -131,7 +131,8 @@ def run_circuit_sim(ip, cid):
     counts = result.get_counts()
     bits = list(counts.keys())[0]
     job_id = str(uuid.uuid4())[:8]
-    sim_jobs[job_id] = list(map(int, bits))
+    clean_bits = bits.replace(" ", "")
+    sim_jobs[job_id] = [int(b) for b in clean_bits]
     return job_id
 
 
@@ -207,7 +208,7 @@ class Handler(socketserver.StreamRequestHandler):
                 continue
             print(f"[REQ] {self.client_address}: {text}")
 
-            parts = text.split(' ', 1)
+            parts = text.strip().split()
             cmd = parts[0].upper()
             args = parts[1:]
             ip = _get_client_ip(self.client_address)
@@ -250,7 +251,7 @@ class Handler(socketserver.StreamRequestHandler):
 
                 elif cmd == "CREATE_CIRCUIT":
                     cid = create_circuit_for_ip(ip, int(args[0]), int(args[1]))
-                    self.send_line(f"CIRCUIT_ID {cid}")
+                    self.send_line(f"CIRCUIT_ID:{cid}")
 
                 elif cmd == "DELETE_CIRCUIT":
                     delete_circuit_for_ip(ip, args[0])
@@ -262,7 +263,7 @@ class Handler(socketserver.StreamRequestHandler):
 
                 elif cmd == "CLONE_CIRCUIT":
                     cid = clone_circuit_for_ip(ip, args[0])
-                    self.send_line(f"CIRCUIT_ID {cid}")
+                    self.send_line(f"CIRCUIT_ID:{cid}")
 
                 elif cmd == "X":
                     _get_circuit(ip, args[0]).x(int(args[1]))
@@ -314,11 +315,11 @@ class Handler(socketserver.StreamRequestHandler):
 
                 elif cmd == "RUN_CIRCUIT_SIM":
                     job_id = run_circuit_sim(ip, args[0])
-                    self.send_line(f"JOBID {job_id}")
+                    self.send_line(f"JOBID:{job_id}")
 
                 elif cmd == "RUN_CIRCUIT_IBM":
                     job_id = run_circuit_ibm(ip, args[0])
-                    self.send_line(f"JOBID {job_id}")
+                    self.send_line(f"JOBID:{job_id}")
 
                 elif cmd == "GET_JOB_RESULT_SIM":
                     res = get_job_result_sim(args[0])
