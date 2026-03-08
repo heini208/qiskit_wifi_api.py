@@ -9,6 +9,7 @@ from collections import deque, OrderedDict
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 from qiskit_aer import Aer
+import random
 
 HOST = "0.0.0.0"
 PORT = 5000
@@ -21,8 +22,8 @@ MAX_CIRCUITS_PER_IP = 5
 circuits_by_ip = {}
 circuits_lock = threading.Lock()
 
-sim_jobs = {}   # job_id -> result list[int]
-ibm_jobs = {}   # job_id -> job_id (mirror)
+sim_jobs = {}
+ibm_jobs = {}
 
 
 def get_local_ip():
@@ -54,6 +55,7 @@ def generate_superposition_qubits_simulated(n):
     bits = list(counts.keys())[0]
     return list(map(int, list(bits)))
 
+
 def generate_superposition_qubits_ibm_job(n):
     service = QiskitRuntimeService()
     backend = service.least_busy(operational=True, simulator=False)
@@ -67,9 +69,11 @@ def generate_superposition_qubits_ibm_job(n):
     job = sampler.run([circuit])
     return f"JOBID:{job.job_id()}"
 
+
 def configure_ibm_token(token: str):
     QiskitRuntimeService.save_account(token=token, set_as_default=True, overwrite=True)
     print("IBM Quantum token configured.")
+
 
 def _get_client_ip(client_address):
     return client_address[0]
@@ -129,10 +133,11 @@ def run_circuit_sim(ip, cid):
     job = backend.run(qc)
     result = job.result()
     counts = result.get_counts()
-    bits = list(counts.keys())[0]
     job_id = str(uuid.uuid4())[:8]
-    clean_bits = bits.replace(" ", "")
-    sim_jobs[job_id] = [int(b) for b in clean_bits]
+    sim_jobs[job_id] = {
+        "counts": counts,
+        "shots": 1024
+    }
     return job_id
 
 
@@ -147,17 +152,12 @@ def run_circuit_ibm(ip, cid):
     return job.job_id()
 
 
-def get_job_result_sim(job_id):
-    if job_id not in sim_jobs:
-        raise ValueError("job-not-found")
-    return sim_jobs[job_id]
-
-
 def get_all_job_ids():
     return {
         "sim": list(sim_jobs.keys()),
         "ibm": list(ibm_jobs.keys())
     }
+
 
 def get_job_status_ibm(job_id: str) -> str:
     """Retrieve the status of a quantum job using IBM Qiskit Runtime."""
@@ -165,14 +165,60 @@ def get_job_status_ibm(job_id: str) -> str:
     job = service.job(job_id)
     return str(job.status())
 
-def get_job_result_ibm(job_id: str) -> list[int]:
-    """Retrieve the result of a quantum job using IBM Qiskit Runtime."""
+
+def _is_ibm_account_connected() -> bool:
+    """Return True if an IBM Quantum account is currently saved/reachable."""
+    try:
+        QiskitRuntimeService()
+        return True
+    except Exception:
+        return False
+
+
+def get_job_result_sim(job_id: str) -> dict:
+    if job_id not in sim_jobs:
+        raise ValueError("job-not-found")
+    return sim_jobs[job_id]["counts"]
+
+
+def get_job_result_ibm(job_id: str) -> dict:
     service = QiskitRuntimeService()
     job = service.job(job_id)
     result = job.result()
     counts = result[0].data['c'].get_counts()
-    bits = list(counts.keys())[0]
-    return list(map(int, list(bits)))
+    return counts
+
+
+def get_job_result(job_id: str) -> dict:
+    if job_id in sim_jobs:
+        return get_job_result_sim(job_id)
+
+    # Fall back to IBM if an account is available
+    if _is_ibm_account_connected():
+        return get_job_result_ibm(job_id)
+
+    raise ValueError("job-not-found")
+
+
+def get_job_sample(job_id: str) -> list[int]:
+    """Draw a single random measurement sample from any job (sim or IBM)."""
+    counts = get_job_result(job_id)
+    states = list(counts.keys())
+    weights = list(counts.values())
+    bits = random.choices(states, weights=weights, k=1)[0]
+    clean_bits = bits.replace(" ", "")
+    return [int(b) for b in clean_bits]
+
+
+def get_job_probabilities_sim(job_id):
+    if job_id not in sim_jobs:
+        raise ValueError("job-not-found")
+
+    counts = sim_jobs[job_id]["counts"]
+    shots = sum(counts.values())
+
+    return {state: c / shots for state, c in counts.items()}
+
 
 class Handler(socketserver.StreamRequestHandler):
     def setup(self):
@@ -226,20 +272,12 @@ class Handler(socketserver.StreamRequestHandler):
                 elif cmd == "SUPERPOSITION_SIM":
                     n = int(args[0]) if args[0] else 1
                     res = generate_superposition_qubits_simulated(n)
-                    self.send_line(f"[{','.join(map(str,res))}]")
+                    self.send_line(f"[{','.join(map(str, res))}]")
 
                 elif cmd == "SUPERPOSITION_IBM":
                     n = int(args[0]) if args[0] else 1
                     out = generate_superposition_qubits_ibm_job(n)
                     self.send_line(out)
-
-                elif cmd == "JOB_RESULT_IBM":
-                    job_id = args[0].strip()
-                    if not job_id:
-                        self.send_line("ERROR jobid-required")
-                    else:
-                        res = get_job_result_ibm(job_id)
-                        self.send_line(f"[{','.join(map(str,res))}]")
 
                 elif cmd == "JOB_STATUS_IBM":
                     job_id = args[0].strip()
@@ -321,9 +359,13 @@ class Handler(socketserver.StreamRequestHandler):
                     job_id = run_circuit_ibm(ip, args[0])
                     self.send_line(f"JOBID:{job_id}")
 
-                elif cmd == "GET_JOB_RESULT_SIM":
-                    res = get_job_result_sim(args[0])
-                    self.send_line(f"[{','.join(map(str, res))}]")
+                elif cmd == "GET_JOB_SAMPLE":
+                    job_id = args[0].strip()
+                    if not job_id:
+                        self.send_line("ERROR jobid-required")
+                    else:
+                        res = get_job_sample(job_id)
+                        self.send_line(f"[{','.join(map(str, res))}]")
 
                 elif cmd == "GET_ALL_JOB_IDS":
                     jobs = get_all_job_ids()
