@@ -209,15 +209,25 @@ def get_job_sample(job_id: str) -> list[int]:
     clean_bits = bits.replace(" ", "")
     return [int(b) for b in clean_bits]
 
+def get_job_states(job_id: str) -> list[str]:
+    """Return all bit-pattern states for a job in sorted order."""
+    counts = get_job_result(job_id)
+    return sorted(counts.keys())
 
-def get_job_probabilities_sim(job_id):
-    if job_id not in sim_jobs:
-        raise ValueError("job-not-found")
 
-    counts = sim_jobs[job_id]["counts"]
-    shots = sum(counts.values())
+def get_job_counts(job_id: str) -> list[int]:
+    """Return raw measurement counts, sorted by state to match get_job_states."""
+    counts = get_job_result(job_id)
+    states = sorted(counts.keys())
+    return [counts[s] for s in states]
 
-    return {state: c / shots for state, c in counts.items()}
+
+def get_job_probabilities(job_id: str) -> list[float]:
+    """Return probabilities, sorted by state to match get_job_states."""
+    counts = get_job_result(job_id)
+    total = sum(counts.values())
+    states = sorted(counts.keys())
+    return [counts[s] / total for s in states]
 
 
 class Handler(socketserver.StreamRequestHandler):
@@ -374,6 +384,30 @@ class Handler(socketserver.StreamRequestHandler):
                 elif cmd == "CONFIGURE_IBM":
                     configure_ibm_token(args[0])
                     self.send_line("OK")
+
+                elif cmd == "GET_JOB_STATES":
+                    job_id = args[0].strip()
+                    if not job_id:
+                        self.send_line("ERROR jobid-required")
+                    else:
+                        states = get_job_states(job_id)
+                        self.send_line("[" + ",".join(f'"{s}"' for s in states) + "]")
+
+                elif cmd == "GET_JOB_COUNTS":
+                    job_id = args[0].strip()
+                    if not job_id:
+                        self.send_line("ERROR jobid-required")
+                    else:
+                        counts = get_job_counts(job_id)
+                        self.send_line(f"[{','.join(map(str, counts))}]")
+
+                elif cmd == "GET_JOB_PROBABILITIES":
+                    job_id = args[0].strip()
+                    if not job_id:
+                        self.send_line("ERROR jobid-required")
+                    else:
+                        probs = get_job_probabilities(job_id)
+                        self.send_line("[" + ",".join(f'"{s}"' for s in probs) + "]")
 
                 else:
                     self.send_line("ERROR unknown-command")
