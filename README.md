@@ -19,8 +19,24 @@ Create your workspace so it looks like this:
 ## Prerequisites
 
 Follow the upstream OpenRoberta prerequisites first:
-
 - https://github.com/OpenRoberta/openroberta-lab#:~:text=compilation%20of%20course.-,Prerequisites,-You%20need%20Java
+
+If open-jdk-11 cannot be found try:
+```bash
+sudo nano /etc/apt/sources.list
+```
+Add this line at the bottom:
+```bash
+
+deb http://deb.debian.org/debian bullseye main
+```
+```bash
+
+sudo apt update
+sudo apt install openjdk-11-jdk
+
+java -version
+```
 
 ## Clone OpenRoberta Lab (this fork + branch)
 
