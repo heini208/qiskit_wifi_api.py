@@ -125,6 +125,7 @@ sudo apt-get install -y python3-full python3-venv
 cd ~/roberta/qiskit_wifi_api.py
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ## Run the Qiskit TCP server
