@@ -1,64 +1,136 @@
 # OpenRoberta + Qiskit Setup
 
-# Folder Structure
-# Make sure you have this folder structure:
-# ~/roberta/openroberta-lab
-# ~/roberta/qiskit_wifi_api.py
-# ~/roberta/ora-cc-rsc
-# ~/roberta/cc/gcc-arm-none-eabi-10.3-2021.10/bin
+This guide describes how to set up **OpenRoberta Lab** (this fork/branch) together with the **Qiskit WiFi/TCP server**.
 
-# Install Prerequisites
-# Follow instructions here:
-# https://github.com/OpenRoberta/openroberta-lab#:~:text=compilation%20of%20course.-,Prerequisites,-You%20need%20Java
+## Folder structure
 
-# Pull the Lab
+Create your workspace so it looks like this:
+
+```text
+~/roberta/
+├─ openroberta-lab/
+├─ qiskit_wifi_api.py/
+├─ ora-cc-rsc/
+└─ cc/
+   └─ gcc-arm-none-eabi-10.3-2021.10/
+      └─ bin/
+```
+
+## Prerequisites
+
+Follow the upstream OpenRoberta prerequisites first:
+
+- https://github.com/OpenRoberta/openroberta-lab#:~:text=compilation%20of%20course.-,Prerequisites,-You%20need%20Java
+
+## Clone OpenRoberta Lab (this fork + branch)
+
+```bash
+cd ~/roberta
 git clone https://github.com/heini208/openroberta-lab.git
-cd open-roberta-lab
+cd openroberta-lab
 git checkout feature/calliope_qiskit
+```
 
-# Download Calliope-CC
-sudo apt-get install srecord libssl-dev
+## Install Calliope-CC prerequisites
 
-# Download GNU ARM Toolchain:
-# https://developer.arm.com/downloads/-/gnu-rm
-# Put xtensa next to roberta and add bin path to ~/.profile
-uname -m  # check if you need aarch or x86_64
-tar -xvjf gcc...
-echo export PATH="$PATH:PATHTOBIN" >> ~/.profile
+```bash
+sudo apt-get update
+sudo apt-get install -y srecord libssl-dev
+```
+
+## Install GNU ARM toolchain
+
+Download **GNU Arm Embedded Toolchain**:
+
+- https://developer.arm.com/downloads/-/gnu-rm
+
+Choose the correct archive for your system:
+
+```bash
+uname -m  # check whether you need aarch64 or x86_64
+```
+
+Extract it (example; adjust filename and destination):
+
+```bash
+mkdir -p ~/roberta/cc
+tar -xvjf gcc-*.tar.bz2 -C ~/roberta/cc
+```
+
+Add the toolchain `bin` directory to your `PATH` (adjust the path to match your extracted folder):
+
+```bash
+echo 'export PATH="$PATH:/home/pi/roberta/cc/gcc-arm-none-eabi-10.3-2021.10/bin"' >> ~/.profile
 source ~/.profile
+```
+
+Verify:
+
+```bash
 arm-none-eabi-g++ --version
-# >> 10.3.1
+# expected: 10.3.1 (or similar)
+```
 
-# Clone ora-cc Resource
+## Clone `ora-cc-rsc` resources
+
+```bash
+cd ~/roberta
 git clone https://github.com/OpenRoberta/ora-cc-rsc.git
-echo export robot_crosscompiler_resourcebase="/home/pi/roberta/ora-cc-rsc" >> ~/.bashrc
-source ~/.bashrc
+```
 
-# Build the Lab
+Export the cross-compiler resource base (adjust the path if needed):
+
+```bash
+echo 'export robot_crosscompiler_resourcebase="/home/pi/roberta/ora-cc-rsc"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+## Build OpenRoberta Lab
+
+```bash
 cd ~/roberta/openroberta-lab
 mvn clean install -DskipTests
 ./admin.sh -git-mode create-empty-db
+```
 
-# Pull Qiskit TCP Server
+## Clone the Qiskit TCP server
+
+```bash
+cd ~/roberta
 git clone https://github.com/heini208/qiskit_wifi_api.py.git
+```
 
-# Install Qiskit Requirements
-sudo apt install -y python3-full python3-venv
-cd ~/roberta/qiskit_wifi_api.py/
+## Install Qiskit server requirements (Python venv)
 
-# Create and activate virtual environment
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-full python3-venv
+
+cd ~/roberta/qiskit_wifi_api.py
 python3 -m venv .venv
 source .venv/bin/activate
+```
 
-# (Optional) Add start script to autostart
-# Or start manually:
-cd ~/roberta/qiskit_wifi_api.py/
+## Run the Qiskit TCP server
+
+Start manually:
+
+```bash
+cd ~/roberta/qiskit_wifi_api.py
 source .venv/bin/activate
 python qiskit_wifi_api.py
+```
 
-# Start OpenRoberta Lab
+> Optional: You can add a start script to autostart (systemd, cron @reboot, etc.).
+
+## Start OpenRoberta Lab
+
+```bash
 cd ~/roberta/openroberta-lab
 ./ora.sh start-from-git
+```
 
-# Lab is running on the IP shown by the Python server on port :1999
-# Qiskit is on the same IP with port :5000
+## Ports / URLs
+
+- **OpenRoberta Lab** runs on the IP shown by the Python server on port `1999` (HTTP): `http://<ip>:1999`
+- **Qiskit TCP server** runs on the same IP on port `5000`: `http://<ip>:5000`
