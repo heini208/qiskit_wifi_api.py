@@ -161,7 +161,8 @@ Type=Application
 Name=Roberta Script
 Exec=/home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
 StartupNotify=false
-Terminal=false```
+Terminal=false
+```
 ```bash
 
 chmod +x /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
