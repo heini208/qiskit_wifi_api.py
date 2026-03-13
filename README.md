@@ -149,15 +149,19 @@ cd ~/roberta/openroberta-lab
 ## Add to Autostart
 ```bash
 
-mkdir -p ~/.config/lxsession/LXDE-pi
-nano ~/.config/lxsession/LXDE-pi/autostart
+mkdir -p ~/.config/autostart
+nano ~/.config/autostart/roberta.desktop
 ```
 
-Add this line:
+Add this:
 ```bash
 
-@bash /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
-```
+[Desktop Entry]
+Type=Application
+Name=Roberta Script
+Exec=/home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
+StartupNotify=false
+Terminal=false```
 ```bash
 
 chmod +x /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
