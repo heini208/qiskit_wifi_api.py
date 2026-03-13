@@ -146,6 +146,24 @@ python qiskit_wifi_api.py
 cd ~/roberta/openroberta-lab
 ./ora.sh start-from-git
 ```
+## Add to Autostart
+```bash
+
+mkdir -p ~/.config/lxsession/LXDE-pi
+nano ~/.config/lxsession/LXDE-pi/autostart
+```
+
+Add this line:
+```bash
+
+@bash /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
+```
+```bash
+
+chmod +x /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
+
+sudo reboot
+```
 
 ## Ports / URLs
 
