@@ -170,6 +170,15 @@ chmod +x /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
 sudo reboot
 ```
 
+## One Time Network Configuration on the PI
+If offline mode start local hotspot:
+```bash
+bash ~/roberta/qiskit_wifi_api.py/start_hotspot.sh
+```
+If Online Mode and previously hotspot used reenable wifi:
+bash ~/roberta/qiskit_wifi_api.py/enable_wifi.sh
+
+
 ## Ports / URLs
 
 - **OpenRoberta Lab** runs on the IP shown by the Python server on port `1999` (HTTP): `http://<ip>:1999`
