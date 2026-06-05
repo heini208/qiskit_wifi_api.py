@@ -19,8 +19,24 @@ Create your workspace so it looks like this:
 ## Prerequisites
 
 Follow the upstream OpenRoberta prerequisites first:
-
 - https://github.com/OpenRoberta/openroberta-lab#:~:text=compilation%20of%20course.-,Prerequisites,-You%20need%20Java
+
+If open-jdk-11 cannot be found try:
+```bash
+sudo nano /etc/apt/sources.list
+```
+Add this line at the bottom:
+```bash
+
+deb http://deb.debian.org/debian bullseye main
+```
+```bash
+
+sudo apt update
+sudo apt install openjdk-11-jdk
+
+java -version
+```
 
 ## Clone OpenRoberta Lab (this fork + branch)
 
@@ -109,6 +125,7 @@ sudo apt-get install -y python3-full python3-venv
 cd ~/roberta/qiskit_wifi_api.py
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ## Run the Qiskit TCP server
@@ -129,7 +146,45 @@ python qiskit_wifi_api.py
 cd ~/roberta/openroberta-lab
 ./ora.sh start-from-git
 ```
+## Add to Autostart
+```bash
 
+mkdir -p ~/.config/autostart
+nano ~/.config/autostart/roberta.desktop
+```
+
+Add this:
+```bash
+
+[Desktop Entry]
+Type=Application
+Name=Roberta Script
+Exec=/home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
+StartupNotify=false
+Terminal=false
+```
+```bash
+
+chmod +x /home/pi/roberta/qiskit_wifi_api.py/start_roberta.sh
+
+sudo reboot
+```
+
+## One Time Network Configuration on the PI
+If offline mode start local hotspot:
+```bash
+bash ~/roberta/qiskit_wifi_api.py/start_hotspot.sh
+```
+If Online Mode and previously hotspot used reenable wifi:
+```bash
+bash ~/roberta/qiskit_wifi_api.py/enable_wifi.sh
+```
+After changing network configuration restart the server:
+restart pi
+or: 
+```bash
+bash ~/roberta/qiskit_wifi_api.py/start_roberta.sh
+```
 ## Ports / URLs
 
 - **OpenRoberta Lab** runs on the IP shown by the Python server on port `1999` (HTTP): `http://<ip>:1999`
