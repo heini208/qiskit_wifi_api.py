@@ -279,6 +279,14 @@ class Handler(socketserver.StreamRequestHandler):
                         self.send_line(f"{','.join(out)}")
                     else:
                         self.send_line("OK")
+                elif cmd == "DEBUG":
+                    debug_msg = " ".join(args)
+                    with lock:
+                        device_logs.append({
+                            "ts": time.time(),
+                            "msg": "DEBUG|" + debug_msg
+                        })
+                    self.send_line("OK")
                 elif cmd == "SUPERPOSITION_SIM":
                     n = int(args[0]) if args[0] else 1
                     res = generate_superposition_qubits_simulated(n)
