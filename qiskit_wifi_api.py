@@ -229,7 +229,6 @@ def get_job_probabilities(job_id: str) -> list[float]:
     states = sorted(counts.keys())
     return [counts[s] / total for s in states]
 
-
 class Handler(socketserver.StreamRequestHandler):
     def setup(self):
         super().setup()
@@ -237,16 +236,21 @@ class Handler(socketserver.StreamRequestHandler):
             connected_devices[self.client_address] = {"connected_at": time.time()}
         print(f"[CONNECT] {self.client_address}")
 
-    def send_line(self, text: str):
-        """Ensure trailing newline and log what we send."""
-        text = "TCPRESPONSE: " + str(text)
+    def send_response_block(self, text: str):
+        """
+        Length-prefixed protocol:
+        LEN:<bytes>\n
+        <payload>
+        """
+        payload = str(text).encode("utf-8")
+        header = f"LEN:{len(payload)}\n".encode("utf-8")
 
-        if not text.endswith("\n"):
-            text += "\n"
+        print(f"[SEND] {self.client_address}: LEN:{len(payload)} {text}")
 
-        print(f"[SEND] {self.client_address}: {text.rstrip()}")
         try:
-            self.wfile.write(text.encode("utf-8"))
+            self.wfile.write(header)
+            self.wfile.write(payload)
+            self.wfile.flush()
         except Exception as e:
             print("[WRITE ERROR]", e)
 
@@ -258,7 +262,7 @@ class Handler(socketserver.StreamRequestHandler):
             try:
                 text = line.decode('utf-8').rstrip('\r\n')
             except Exception:
-                self.send_line("ERROR invalid-encoding")
+                self.send_response_block("ERROR invalid-encoding")
                 continue
             if not text:
                 continue
@@ -276,9 +280,9 @@ class Handler(socketserver.StreamRequestHandler):
                         msg = e["msg"].replace("|", "\\|")
                         out.append(f"{int(e['ts'])}:{msg}")
                     if out:
-                        self.send_line(f"{','.join(out)}")
+                        self.send_response_block(f"{','.join(out)}")
                     else:
-                        self.send_line("OK")
+                        self.send_response_block("OK")
                 elif cmd == "DEBUG":
                     debug_msg = " ".join(args)
                     with lock:
@@ -286,142 +290,141 @@ class Handler(socketserver.StreamRequestHandler):
                             "ts": time.time(),
                             "msg": "DEBUG|" + debug_msg
                         })
-                    self.send_line("OK")
+                    self.send_response_block("OK")
                 elif cmd == "SUPERPOSITION_SIM":
                     n = int(args[0]) if args[0] else 1
                     res = generate_superposition_qubits_simulated(n)
-                    self.send_line(f"[{','.join(map(str, res))}]")
+                    self.send_response_block(f"[{','.join(map(str, res))}]")
 
                 elif cmd == "SUPERPOSITION_IBM":
                     n = int(args[0]) if args[0] else 1
                     out = generate_superposition_qubits_ibm_job(n)
-                    self.send_line(out)
+                    self.send_response_block(out)
 
                 elif cmd == "JOB_STATUS_IBM":
                     job_id = args[0].strip()
                     if not job_id:
-                        self.send_line("ERROR jobid-required")
+                        self.send_response_block("ERROR jobid-required")
                     else:
                         status = get_job_status_ibm(job_id)
-                        self.send_line(f"{status}")
+                        self.send_response_block(f"{status}")
 
                 elif cmd == "CREATE_CIRCUIT":
                     cid = create_circuit_for_ip(ip, int(args[0]), int(args[1]))
-                    self.send_line(f"CIRCUIT_ID:{cid}")
+                    self.send_response_block(f"CIRCUIT_ID:{cid}")
 
                 elif cmd == "DELETE_CIRCUIT":
                     delete_circuit_for_ip(ip, args[0])
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "RESET_CIRCUIT":
                     reset_circuit_for_ip(ip, args[0])
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "CLONE_CIRCUIT":
                     cid = clone_circuit_for_ip(ip, args[0])
-                    self.send_line(f"CIRCUIT_ID:{cid}")
+                    self.send_response_block(f"CIRCUIT_ID:{cid}")
 
                 elif cmd == "X":
                     _get_circuit(ip, args[0]).x(int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "H":
                     _get_circuit(ip, args[0]).h(int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "Y":
                     _get_circuit(ip, args[0]).y(int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "Z":
                     _get_circuit(ip, args[0]).z(int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "RX":
                     _get_circuit(ip, args[0]).rx(float(args[2]), int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "RY":
                     _get_circuit(ip, args[0]).ry(float(args[2]), int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "RZ":
                     _get_circuit(ip, args[0]).rz(float(args[2]), int(args[1]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "CX":
                     _get_circuit(ip, args[0]).cx(int(args[1]), int(args[2]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "CZ":
                     _get_circuit(ip, args[0]).cz(int(args[1]), int(args[2]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "SWAP":
                     _get_circuit(ip, args[0]).swap(int(args[1]), int(args[2]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "MEASURE":
                     _get_circuit(ip, args[0]).measure(int(args[1]), int(args[2]))
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "MEASURE_ALL":
                     _get_circuit(ip, args[0]).measure_all()
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "RUN_CIRCUIT_SIM":
                     job_id = run_circuit_sim(ip, args[0])
-                    self.send_line(f"JOBID:{job_id}")
+                    self.send_response_block(f"JOBID:{job_id}")
 
                 elif cmd == "RUN_CIRCUIT_IBM":
                     job_id = run_circuit_ibm(ip, args[0])
-                    self.send_line(f"JOBID:{job_id}")
+                    self.send_response_block(f"JOBID:{job_id}")
 
                 elif cmd == "GET_JOB_SAMPLE":
                     job_id = args[0].strip()
                     if not job_id:
-                        self.send_line("ERROR jobid-required")
+                        self.send_response_block("ERROR jobid-required")
                     else:
                         res = get_job_sample(job_id)
-                        self.send_line(f"[{','.join(map(str, res))}]")
+                        self.send_response_block(f"[{','.join(map(str, res))}]")
 
                 elif cmd == "GET_ALL_JOB_IDS":
                     jobs = get_all_job_ids()
-                    self.send_line(f"SIM={','.join(jobs['sim'])}|IBM={','.join(jobs['ibm'])}")
+                    self.send_response_block(f"SIM={','.join(jobs['sim'])}|IBM={','.join(jobs['ibm'])}")
 
                 elif cmd == "CONFIGURE_IBM":
                     configure_ibm_token(args[0])
-                    self.send_line("OK")
+                    self.send_response_block("OK")
 
                 elif cmd == "GET_JOB_STATES":
                     job_id = args[0].strip()
                     if not job_id:
-                        self.send_line("ERROR jobid-required")
+                        self.send_response_block("ERROR jobid-required")
                     else:
                         states = get_job_states(job_id)
-                        self.send_line("[" + ",".join(f'"{s}"' for s in states) + "]")
+                        self.send_response_block("[" + ",".join(f'"{s}"' for s in states) + "]")
 
                 elif cmd == "GET_JOB_COUNTS":
                     job_id = args[0].strip()
                     if not job_id:
-                        self.send_line("ERROR jobid-required")
+                        self.send_response_block("ERROR jobid-required")
                     else:
                         counts = get_job_counts(job_id)
-                        self.send_line(f"[{','.join(map(str, counts))}]")
+                        self.send_response_block(f"[{','.join(map(str, counts))}]")
 
                 elif cmd == "GET_JOB_PROBABILITIES":
                     job_id = args[0].strip()
                     if not job_id:
-                        self.send_line("ERROR jobid-required")
+                        self.send_response_block("ERROR jobid-required")
                     else:
                         probs = get_job_probabilities(job_id)
-                        self.send_line("[" + ",".join(f'"{s}"' for s in probs) + "]")
-
+                        self.send_response_block("[" + ",".join(map(str, probs)) + "]")
                 else:
-                    self.send_line("ERROR unknown-command")
+                    self.send_response_block("ERROR unknown-command")
 
             except Exception as e:
-                self.send_line("ERROR " + str(e))
+                self.send_response_block("ERROR " + str(e))
 
     def finish(self):
         super().finish()
