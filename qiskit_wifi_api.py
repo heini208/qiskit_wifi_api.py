@@ -209,6 +209,7 @@ def get_job_sample(job_id: str) -> list[int]:
     clean_bits = bits.replace(" ", "")
     return [int(b) for b in clean_bits]
 
+
 def get_job_states(job_id: str) -> list[str]:
     """Return all bit-pattern states for a job in sorted order."""
     counts = get_job_result(job_id)
@@ -229,9 +230,14 @@ def get_job_probabilities(job_id: str) -> list[float]:
     states = sorted(counts.keys())
     return [counts[s] / total for s in states]
 
+
 class Handler(socketserver.StreamRequestHandler):
     def setup(self):
         super().setup()
+
+        # Prevent dead Calliope/ESP connections from blocking forever.
+        self.request.settimeout(10)
+
         with lock:
             connected_devices[self.client_address] = {"connected_at": time.time()}
         print(f"[CONNECT] {self.client_address}")
@@ -256,16 +262,30 @@ class Handler(socketserver.StreamRequestHandler):
 
     def handle(self):
         while True:
-            line = self.rfile.readline()
+            try:
+                line = self.rfile.readline()
+            except socket.timeout:
+                print(f"[TIMEOUT] {self.client_address}")
+                break
+            except ConnectionResetError:
+                print(f"[RESET] {self.client_address}")
+                break
+            except OSError as e:
+                print(f"[READ ERROR] {self.client_address}: {e}")
+                break
+
             if not line:
                 break
+
             try:
                 text = line.decode('utf-8').rstrip('\r\n')
             except Exception:
                 self.send_response_block("ERROR invalid-encoding")
                 continue
+
             if not text:
                 continue
+
             print(f"[REQ] {self.client_address}: {text}")
 
             parts = text.strip().split()
@@ -274,7 +294,10 @@ class Handler(socketserver.StreamRequestHandler):
             ip = _get_client_ip(self.client_address)
 
             try:
-                if cmd == "LOGS":
+                if cmd == "PING":
+                    self.send_response_block("OK")
+
+                elif cmd == "LOGS":
                     out = []
                     for e in device_logs:
                         msg = e["msg"].replace("|", "\\|")
@@ -283,6 +306,7 @@ class Handler(socketserver.StreamRequestHandler):
                         self.send_response_block(f"{','.join(out)}")
                     else:
                         self.send_response_block("OK")
+
                 elif cmd == "DEBUG":
                     debug_msg = " ".join(args)
                     with lock:
@@ -291,6 +315,7 @@ class Handler(socketserver.StreamRequestHandler):
                             "msg": "DEBUG|" + debug_msg
                         })
                     self.send_response_block("OK")
+
                 elif cmd == "SUPERPOSITION_SIM":
                     n = int(args[0]) if args[0] else 1
                     res = generate_superposition_qubits_simulated(n)
@@ -420,6 +445,7 @@ class Handler(socketserver.StreamRequestHandler):
                     else:
                         probs = get_job_probabilities(job_id)
                         self.send_response_block("[" + ",".join(map(str, probs)) + "]")
+
                 else:
                     self.send_response_block("ERROR unknown-command")
 
@@ -427,15 +453,20 @@ class Handler(socketserver.StreamRequestHandler):
                 self.send_response_block("ERROR " + str(e))
 
     def finish(self):
-        super().finish()
+        try:
+            super().finish()
+        except Exception as e:
+            print(f"[FINISH ERROR] {self.client_address}: {e}")
+
         with lock:
-            if self.client_address in connected_devices:
-                del connected_devices[self.client_address]
+            connected_devices.pop(self.client_address, None)
+
         print(f"[DISCONNECT] {self.client_address}")
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 
 if __name__ == "__main__":
